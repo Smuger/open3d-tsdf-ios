@@ -204,8 +204,9 @@ jobs:
             -headers staging-tsdf/include \
             -output open3d-tsdf-iOS.xcframework
 
-          # Compute checksum for SwiftPM .binaryTarget(checksum:)
-          swift package compute-checksum open3d-tsdf-iOS.xcframework \
+          # SwiftPM .binaryTarget requires a zip archive; checksum is over the zip
+          zip -r open3d-tsdf-iOS.xcframework.zip open3d-tsdf-iOS.xcframework
+          swift package compute-checksum open3d-tsdf-iOS.xcframework.zip \
             > open3d-tsdf-iOS.xcframework.sha256
           echo "SHA-256: $(cat open3d-tsdf-iOS.xcframework.sha256)"
 
@@ -215,6 +216,6 @@ jobs:
         with:
           name: open3d-tsdf-iOS-arm64-v0.19.0
           path: |
-            open3d-tsdf-iOS.xcframework
+            open3d-tsdf-iOS.xcframework.zip
             open3d-tsdf-iOS.xcframework.sha256
           retention-days: 90
