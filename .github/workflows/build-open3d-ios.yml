@@ -1,17 +1,23 @@
 name: Build Open3D TSDF (iOS)
 
 # Builds the standalone open3d-tsdf static library (TSDF integration subsystem
-# extracted from Open3D v0.19.0) for arm64-apple-ios and packages it as an
-# XCFramework artifact that SwiftPM can consume as a .binaryTarget.
+# extracted from Open3D v0.19.0) for BOTH arm64-apple-ios AND arm64-apple-ios-simulator,
+# then bundles both slices into a single fat XCFramework for SwiftPM .binaryTarget use.
 #
 # Source: dependency/manual/open3d-tsdf/  (MIT, derived from Open3D v0.19.0)
 # Only compiles:
 #   - UniformTSDFVolume.cpp / ScalableTSDFVolume.cpp (TSDF algorithm)
 #   - Image.cpp / ImageFactory.cpp (depth-image type)
-# External dep: Eigen 5.0.1 only.
+# External dep: Eigen 5.0.1 only (header-only).
+#
+# Eigen strategy:
+#   - Device build: Conan install → conan_toolchain.cmake (sets sysroot=iphoneos with FORCE)
+#   - Simulator build: CMAKE_PREFIX_PATH pointing at device Conan output so that
+#     find_package(Eigen3) resolves without using the Conan toolchain, which cannot
+#     be overridden to iphonesimulator due to FORCE in the generated file.
 #
 # Trigger manually or on changes to the TSDF source or this workflow.
-# Do NOT run on every commit — compile only changes when Open3D pin changes.
+# Do NOT run on every commit — compile only when the Open3D pin changes.
 on:
   workflow_dispatch:
   push:
@@ -40,10 +46,12 @@ jobs:
       - name: Restore build cache
         uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
-          path: build-tsdf-ios
-          key: tsdf-ios-arm64-${{ runner.os }}-${{ hashFiles('dependency/manual/open3d-tsdf/**', 'conan/recipes/open3d-tsdf/**') }}
+          path: |
+            build-tsdf-ios-device
+            build-tsdf-ios-sim
+          key: tsdf-ios-fat-${{ runner.os }}-${{ hashFiles('dependency/manual/open3d-tsdf/**', 'conan/recipes/open3d-tsdf/**') }}
           restore-keys: |
-            tsdf-ios-arm64-${{ runner.os }}-
+            tsdf-ios-fat-${{ runner.os }}-
 
       # ── Load build-tool versions from deps.json ─────────────────────────────
       # deps.json is the single source of truth for all versions and hashes.
@@ -142,14 +150,15 @@ jobs:
           unzip -q ninja.zip -d /usr/local/bin
 
           # conan — commit archive URL is immutable; no mutable tag in the URL
-          # commit b57015c99d82424f056e21b3919de596d03dabd8 = v2.29.1
           pip install --quiet --break-system-packages \
             "https://github.com/conan-io/conan/archive/${CONAN_COMMIT}.tar.gz"
           conan profile detect --force
 
-      # ── Install Eigen via Conan ─────────────────────────────────────────────
+      # ── Install Eigen via Conan (device) ─────────────────────────────────────
       # Uses a committed lockfile that freezes the exact ConanCenter recipe
       # revision for eigen/5.0.1 against the ios-arm64 profile.
+      # The simulator build reuses this output via CMAKE_PREFIX_PATH — Eigen is
+      # header-only so its Eigen3Config.cmake is platform-agnostic.
       #
       # To regenerate conan/locks/ios-arm64.lock after bumping a dep:
       #   conan lock create --requires="eigen/5.0.1" \
@@ -160,12 +169,12 @@ jobs:
       #     --settings compiler.version=17 --settings compiler.libcxx=libc++ \
       #     --settings build_type=Release
       #   git add conan/locks/ios-arm64.lock && git commit -m "chore: refresh ios-arm64 conan lock"
-      - name: Install Eigen (Conan)
+      - name: Install Eigen (Conan — device)
         run: |
           conan install \
             --requires="eigen/5.0.1" \
             --lockfile=conan/locks/ios-arm64.lock \
-            --output-folder=build-tsdf-ios \
+            --output-folder=build-tsdf-ios-device \
             --build=missing \
             -g CMakeToolchain \
             -g CMakeDeps \
@@ -179,46 +188,67 @@ jobs:
             --settings compiler.libcxx=libc++ \
             --settings build_type=Release
 
-      # ── Configure ───────────────────────────────────────────────────────────
-      - name: Configure CMake
+      # ── Configure ────────────────────────────────────────────────────────────
+      - name: Configure CMake — device (arm64-apple-ios)
         run: |
-          cmake -B build-tsdf-ios -G Ninja \
+          cmake -B build-tsdf-ios-device -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build-tsdf-ios/conan_toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build-tsdf-ios-device/conan_toolchain.cmake" \
             -S dependency/manual/open3d-tsdf
 
-      # ── Build ────────────────────────────────────────────────────────────────
-      - name: Build
-        run: cmake --build build-tsdf-ios --config Release --parallel $(sysctl -n hw.logicalcpu)
-
-      # ── Package as XCFramework ───────────────────────────────────────────────
-      # XCFramework bundles the .a + public headers so SwiftPM can import it
-      # as a .binaryTarget(url:checksum:) once the artifact is hosted.
-      - name: Package XCFramework
+      - name: Configure CMake — simulator (arm64-apple-ios-simulator)
         run: |
-          # Install to a staging directory
-          cmake --install build-tsdf-ios --prefix staging-tsdf
+          # No Conan toolchain for the simulator — the generated file sets
+          # CMAKE_OSX_SYSROOT=iphoneos with FORCE and cannot be overridden.
+          # CMAKE_PREFIX_PATH points at the device Conan output so that
+          # find_package(Eigen3) resolves via the same header-only Eigen3Config.cmake.
+          cmake -B build-tsdf-ios-sim -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build-tsdf-ios-device" \
+            -S dependency/manual/open3d-tsdf
+
+      # ── Build ─────────────────────────────────────────────────────────────────
+      - name: Build — device
+        run: cmake --build build-tsdf-ios-device --config Release --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Build — simulator
+        run: cmake --build build-tsdf-ios-sim --config Release --parallel $(sysctl -n hw.logicalcpu)
+
+      # ── Package as fat XCFramework ────────────────────────────────────────────
+      # Both slices go into one XCFramework; SwiftPM picks the right slice at
+      # link time via the XCFramework's Info.plist automatically.
+      # The zip is what SwiftPM fetches; compute-checksum is over the zip.
+      - name: Package fat XCFramework
+        run: |
+          cmake --install build-tsdf-ios-device --prefix staging-tsdf-device
+          cmake --install build-tsdf-ios-sim    --prefix staging-tsdf-sim
 
           xcodebuild -create-xcframework \
-            -library staging-tsdf/lib/libopen3d_tsdf.a \
-            -headers staging-tsdf/include \
+            -library staging-tsdf-device/lib/libopen3d_tsdf.a \
+            -headers staging-tsdf-device/include \
+            -library staging-tsdf-sim/lib/libopen3d_tsdf.a \
+            -headers staging-tsdf-sim/include \
             -output open3d-tsdf-iOS.xcframework
 
-          # SwiftPM .binaryTarget requires a zip archive; checksum is over the zip
           zip -r open3d-tsdf-iOS.xcframework.zip open3d-tsdf-iOS.xcframework
           swift package compute-checksum open3d-tsdf-iOS.xcframework.zip \
             > open3d-tsdf-iOS.xcframework.sha256
           echo "SHA-256: $(cat open3d-tsdf-iOS.xcframework.sha256)"
 
-      # ── Create GitHub Release ────────────────────────────────────────────────
+      # ── Create GitHub Release ─────────────────────────────────────────────────
       # Deletes any existing release for this tag before recreating, so
-      # re-running the workflow (e.g. after a source fix) always produces a
-      # fresh release. The zip is what SwiftPM fetches; the .sha256 is the
-      # value to paste into .binaryTarget(url:checksum:).
+      # re-running the workflow always produces a fresh release.
+      # After this runs, copy the new SHA-256 into iphone-3d-scanner:
+      #   deps.json → cpp_deps.open3d_tsdf.xcframework.checksum
+      #   Package.swift → .binaryTarget checksum
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -228,6 +258,12 @@ jobs:
           gh release create "$TAG" \
             open3d-tsdf-iOS.xcframework.zip \
             open3d-tsdf-iOS.xcframework.sha256 \
-            --title "open3d-tsdf iOS arm64 v${OPEN3D_VERSION}" \
-            --notes "Static XCFramework build of the Open3D v${OPEN3D_VERSION} TSDF integration subsystem for arm64-apple-ios." \
+            --title "open3d-tsdf iOS fat v${OPEN3D_VERSION}" \
+            --notes "Static fat XCFramework build of the Open3D v${OPEN3D_VERSION} TSDF integration subsystem.
+
+Slices: arm64-apple-ios (device) + arm64-apple-ios-simulator
+
+After downloading, update iphone-3d-scanner:
+- \`deps.json\` → \`cpp_deps.open3d_tsdf.xcframework.checksum\`
+- \`Package.swift\` → \`.binaryTarget\` checksum" \
             --latest
