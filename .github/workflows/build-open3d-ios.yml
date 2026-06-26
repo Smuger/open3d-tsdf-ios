@@ -28,6 +28,8 @@ on:
 jobs:
   build-tsdf-ios:
     runs-on: macos-26
+    permissions:
+      contents: write
 
     steps:
       # ── Checkout this repository ────────────────────────────────────────────
@@ -62,7 +64,8 @@ jobs:
           python3 - << 'EOF'
           import json, os
           with open("deps.json") as f:
-              bt = json.load(f)["build_tools"]
+              d = json.load(f)
+          bt = d["build_tools"]
           lines = [
               f"CMAKE_VERSION={bt['cmake']['version']}",
               f"CMAKE_COMMIT={bt['cmake']['commit']}",
@@ -71,6 +74,7 @@ jobs:
               f"NINJA_COMMIT={bt['ninja']['commit']}",
               f"NINJA_SHA256={bt['ninja']['sha256_mac']}",
               f"CONAN_COMMIT={bt['conan']['commit']}",
+              f"OPEN3D_VERSION={d['cpp_deps']['open3d_tsdf']['version']}",
           ]
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write("\n".join(lines) + "\n")
@@ -210,12 +214,20 @@ jobs:
             > open3d-tsdf-iOS.xcframework.sha256
           echo "SHA-256: $(cat open3d-tsdf-iOS.xcframework.sha256)"
 
-      # ── Upload artifact ──────────────────────────────────────────────────────
-      - name: Upload XCFramework
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: open3d-tsdf-iOS-arm64-v0.19.0
-          path: |
-            open3d-tsdf-iOS.xcframework.zip
-            open3d-tsdf-iOS.xcframework.sha256
-          retention-days: 90
+      # ── Create GitHub Release ────────────────────────────────────────────────
+      # Deletes any existing release for this tag before recreating, so
+      # re-running the workflow (e.g. after a source fix) always produces a
+      # fresh release. The zip is what SwiftPM fetches; the .sha256 is the
+      # value to paste into .binaryTarget(url:checksum:).
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="open3d-tsdf-ios-v${OPEN3D_VERSION}"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            open3d-tsdf-iOS.xcframework.zip \
+            open3d-tsdf-iOS.xcframework.sha256 \
+            --title "open3d-tsdf iOS arm64 v${OPEN3D_VERSION}" \
+            --notes "Static XCFramework build of the Open3D v${OPEN3D_VERSION} TSDF integration subsystem for arm64-apple-ios." \
+            --latest
