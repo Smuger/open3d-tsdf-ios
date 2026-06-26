@@ -254,16 +254,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="open3d-tsdf-ios-v${OPEN3D_VERSION}"
+          NOTES=$(cat <<EOF
+Static fat XCFramework build of the Open3D v${OPEN3D_VERSION} TSDF integration subsystem.
+
+Slices: arm64-apple-ios (device) + arm64-apple-ios-simulator
+
+After downloading, update iphone-3d-scanner:
+- deps.json -> cpp_deps.open3d_tsdf.xcframework.checksum
+- Package.swift -> .binaryTarget checksum
+EOF
+)
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
             open3d-tsdf-iOS.xcframework.zip \
             open3d-tsdf-iOS.xcframework.sha256 \
             --title "open3d-tsdf iOS fat v${OPEN3D_VERSION}" \
-            --notes "Static fat XCFramework build of the Open3D v${OPEN3D_VERSION} TSDF integration subsystem.
-
-Slices: arm64-apple-ios (device) + arm64-apple-ios-simulator
-
-After downloading, update iphone-3d-scanner:
-- \`deps.json\` → \`cpp_deps.open3d_tsdf.xcframework.checksum\`
-- \`Package.swift\` → \`.binaryTarget\` checksum" \
+            --notes "$NOTES" \
             --latest
