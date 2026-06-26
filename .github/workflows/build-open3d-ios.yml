@@ -163,6 +163,8 @@ jobs:
             --lockfile=conan/locks/ios-arm64.lock \
             --output-folder=build-tsdf-ios \
             --build=missing \
+            -g CMakeToolchain \
+            -g CMakeDeps \
             --profile:build=default \
             --settings os=iOS \
             --settings os.version=16.0 \
