@@ -1,0 +1,32 @@
+{
+  "build_tools": {
+    "cmake": {
+      "version": "4.3.3",
+      "commit": "06cc1d04d8d5a4e13abdadfe20f6937787b1968e",
+      "sha256_macos_universal": "5221a13450c7a0219a2a0d1b6c9085eb06489721fafd8488ccebc1584175d2fb"
+    },
+    "ninja": {
+      "version": "1.13.2",
+      "commit": "3441b633c2fe2c494e958780ba0f4227b1327634",
+      "sha256_mac": "c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b"
+    },
+    "conan": {
+      "version": "2.29.1",
+      "commit": "b57015c99d82424f056e21b3919de596d03dabd8"
+    }
+  },
+  "cpp_deps": {
+    "eigen": {
+      "version": "5.0.1",
+      "commit": "bc3b39870ecb690a623a3f49149a358b95c5781d",
+      "source": "conancenter"
+    },
+    "open3d_tsdf": {
+      "version": "0.19.0",
+      "source": "local_source",
+      "commit": "1e7b174",
+      "path": "third_party/open3d-tsdf",
+      "note": "TSDF subsystem extracted from Open3D v0.19.0"
+    }
+  }
+}

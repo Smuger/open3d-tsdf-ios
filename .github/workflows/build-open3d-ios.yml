@@ -1,0 +1,213 @@
+name: Build Open3D TSDF (iOS)
+
+# Builds the standalone open3d-tsdf static library (TSDF integration subsystem
+# extracted from Open3D v0.19.0) for arm64-apple-ios and packages it as an
+# XCFramework artifact that SwiftPM can consume as a .binaryTarget.
+#
+# Source: dependency/manual/open3d-tsdf/  (MIT, derived from Open3D v0.19.0)
+# Only compiles:
+#   - UniformTSDFVolume.cpp / ScalableTSDFVolume.cpp (TSDF algorithm)
+#   - Image.cpp / ImageFactory.cpp (depth-image type)
+# External dep: Eigen 5.0.1 only.
+#
+# Trigger manually or on changes to the TSDF source or this workflow.
+# Do NOT run on every commit — compile only changes when Open3D pin changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - dependency/manual/open3d-tsdf/**
+      - conan/recipes/open3d-tsdf/**
+      - .github/workflows/build-open3d-ios.yml
+
+# NOTE ON RUNNER PINNING
+# GitHub Actions runners (macos-26) cannot be pinned to a commit SHA.
+# Using a concrete version label is the closest available guarantee.
+# Avoid macos-latest — it is a floating alias.
+
+jobs:
+  build-tsdf-ios:
+    runs-on: macos-26
+
+    steps:
+      # ── Checkout this repository ────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # ── Restore build cache from previous run ───────────────────────────────
+      - name: Restore build cache
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: build-tsdf-ios
+          key: tsdf-ios-arm64-${{ runner.os }}-${{ hashFiles('dependency/manual/open3d-tsdf/**', 'conan/recipes/open3d-tsdf/**') }}
+          restore-keys: |
+            tsdf-ios-arm64-${{ runner.os }}-
+
+      # ── Load build-tool versions from deps.json ─────────────────────────────
+      # deps.json is the single source of truth for all versions and hashes.
+      # To bump cmake, ninja, or conan: edit deps.json only.
+      #
+      # Layers of verification for cmake and ninja:
+      #   1. API pre-flight: tag → commit SHA must match deps.json value
+      #   2. Binary SHA-256: downloaded file content must match deps.json hash
+      #
+      # To bump cmake: update deps.json. Get the new SHA-256 from Kitware:
+      #   curl -sL https://github.com/Kitware/CMake/releases/download/vX.Y.Z/cmake-X.Y.Z-SHA-256.txt \
+      #     | grep macos-universal.tar.gz
+      # To bump ninja: update deps.json. Get SHA-256 with:
+      #   curl -sL <ninja-mac.zip-url> | shasum -a 256
+      # To bump conan: find commit SHA on the release page, update deps.json.
+      - name: Load build-tool versions from deps.json
+        run: |
+          python3 - << 'EOF'
+          import json, os
+          with open("deps.json") as f:
+              bt = json.load(f)["build_tools"]
+          lines = [
+              f"CMAKE_VERSION={bt['cmake']['version']}",
+              f"CMAKE_COMMIT={bt['cmake']['commit']}",
+              f"CMAKE_SHA256={bt['cmake']['sha256_macos_universal']}",
+              f"NINJA_VERSION={bt['ninja']['version']}",
+              f"NINJA_COMMIT={bt['ninja']['commit']}",
+              f"NINJA_SHA256={bt['ninja']['sha256_mac']}",
+              f"CONAN_COMMIT={bt['conan']['commit']}",
+          ]
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write("\n".join(lines) + "\n")
+          for line in lines:
+              print(line)
+          EOF
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+
+          # ── Pre-flight: verify each tag points at the expected commit ────────
+          # Handles both lightweight tags (type=commit) and annotated tags
+          # (type=tag, which requires a second API call to dereference to a commit).
+          # Fails immediately if the tag has been moved — before any download.
+          resolve_tag_commit() {
+            local repo="$1" tag="$2"
+            local ref obj_type obj_sha
+            ref=$(curl -fsSL "https://api.github.com/repos/${repo}/git/ref/tags/${tag}")
+            obj_type=$(printf '%s' "$ref" | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['type'])")
+            obj_sha=$(printf '%s'  "$ref" | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['sha'])")
+            if [ "$obj_type" = "tag" ]; then
+              # Annotated tag: dereference tag object → commit
+              curl -fsSL "https://api.github.com/repos/${repo}/git/tags/${obj_sha}" \
+                | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['sha'])"
+            else
+              printf '%s\n' "$obj_sha"
+            fi
+          }
+
+          cmake_actual=$(resolve_tag_commit "Kitware/CMake" "v${CMAKE_VERSION}")
+          if [ "$cmake_actual" != "$CMAKE_COMMIT" ]; then
+            printf 'ERROR: cmake v%s tag has been moved\n  expected: %s\n  actual:   %s\n' \
+              "$CMAKE_VERSION" "$CMAKE_COMMIT" "$cmake_actual" >&2
+            exit 1
+          fi
+          printf 'cmake tag OK: %s\n' "$cmake_actual"
+
+          ninja_actual=$(resolve_tag_commit "ninja-build/ninja" "v${NINJA_VERSION}")
+          if [ "$ninja_actual" != "$NINJA_COMMIT" ]; then
+            printf 'ERROR: ninja v%s tag has been moved\n  expected: %s\n  actual:   %s\n' \
+              "$NINJA_VERSION" "$NINJA_COMMIT" "$ninja_actual" >&2
+            exit 1
+          fi
+          printf 'ninja tag OK: %s\n' "$ninja_actual"
+
+          # ── Download and verify binaries ─────────────────────────────────────
+          # cmake — Kitware official binary; SHA-256 from their published checksum file
+          curl -fsSL \
+            "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-macos-universal.tar.gz" \
+            -o cmake.tar.gz
+          echo "${CMAKE_SHA256}  cmake.tar.gz" | shasum -a 256 --check
+          tar -xf cmake.tar.gz -C /opt
+          echo "/opt/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+
+          # ninja — ninja-build official binary
+          curl -fsSL \
+            "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-mac.zip" \
+            -o ninja.zip
+          echo "${NINJA_SHA256}  ninja.zip" | shasum -a 256 --check
+          unzip -q ninja.zip -d /usr/local/bin
+
+          # conan — commit archive URL is immutable; no mutable tag in the URL
+          # commit b57015c99d82424f056e21b3919de596d03dabd8 = v2.29.1
+          pip install --quiet \
+            "https://github.com/conan-io/conan/archive/${CONAN_COMMIT}.tar.gz"
+          conan profile detect --force
+
+      # ── Install Eigen via Conan ─────────────────────────────────────────────
+      # Uses a committed lockfile that freezes the exact ConanCenter recipe
+      # revision for eigen/5.0.1 against the ios-arm64 profile.
+      #
+      # To regenerate conan/locks/ios-arm64.lock after bumping a dep:
+      #   conan lock create --requires="eigen/5.0.1" \
+      #     --lockfile-out=conan/locks/ios-arm64.lock \
+      #     --profile:build=default \
+      #     --settings os=iOS --settings os.version=16.0 \
+      #     --settings arch=armv8 --settings compiler=apple-clang \
+      #     --settings compiler.version=16 --settings compiler.libcxx=libc++ \
+      #     --settings build_type=Release
+      #   git add conan/locks/ios-arm64.lock && git commit -m "chore: refresh ios-arm64 conan lock"
+      - name: Install Eigen (Conan)
+        run: |
+          conan install \
+            --requires="eigen/5.0.1" \
+            --lockfile=conan/locks/ios-arm64.lock \
+            --output-folder=build-tsdf-ios \
+            --build=missing \
+            --profile:build=default \
+            --settings os=iOS \
+            --settings os.version=16.0 \
+            --settings arch=armv8 \
+            --settings compiler=apple-clang \
+            --settings compiler.version=16 \
+            --settings compiler.libcxx=libc++ \
+            --settings build_type=Release
+
+      # ── Configure ───────────────────────────────────────────────────────────
+      - name: Configure CMake
+        run: |
+          cmake -B build-tsdf-ios -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="build-tsdf-ios/conan_toolchain.cmake" \
+            -S dependency/manual/open3d-tsdf
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Build
+        run: cmake --build build-tsdf-ios --config Release --parallel $(sysctl -n hw.logicalcpu)
+
+      # ── Package as XCFramework ───────────────────────────────────────────────
+      # XCFramework bundles the .a + public headers so SwiftPM can import it
+      # as a .binaryTarget(url:checksum:) once the artifact is hosted.
+      - name: Package XCFramework
+        run: |
+          # Install to a staging directory
+          cmake --install build-tsdf-ios --prefix staging-tsdf
+
+          xcodebuild -create-xcframework \
+            -library staging-tsdf/lib/libopen3d_tsdf.a \
+            -headers staging-tsdf/include \
+            -output open3d-tsdf-iOS.xcframework
+
+          # Compute checksum for SwiftPM .binaryTarget(checksum:)
+          swift package compute-checksum open3d-tsdf-iOS.xcframework \
+            > open3d-tsdf-iOS.xcframework.sha256
+          echo "SHA-256: $(cat open3d-tsdf-iOS.xcframework.sha256)"
+
+      # ── Upload artifact ──────────────────────────────────────────────────────
+      - name: Upload XCFramework
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: open3d-tsdf-iOS-arm64-v0.19.0
+          path: |
+            open3d-tsdf-iOS.xcframework
+            open3d-tsdf-iOS.xcframework.sha256
+          retention-days: 90
