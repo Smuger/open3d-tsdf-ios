@@ -79,6 +79,8 @@ jobs:
           EOF
 
       - name: Install build tools
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -89,12 +91,14 @@ jobs:
           resolve_tag_commit() {
             local repo="$1" tag="$2"
             local ref obj_type obj_sha
-            ref=$(curl -fsSL "https://api.github.com/repos/${repo}/git/ref/tags/${tag}")
+            ref=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${repo}/git/ref/tags/${tag}")
             obj_type=$(printf '%s' "$ref" | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['type'])")
             obj_sha=$(printf '%s'  "$ref" | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['sha'])")
             if [ "$obj_type" = "tag" ]; then
               # Annotated tag: dereference tag object → commit
-              curl -fsSL "https://api.github.com/repos/${repo}/git/tags/${obj_sha}" \
+              curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                "https://api.github.com/repos/${repo}/git/tags/${obj_sha}" \
                 | python3 -c "import json,sys; print(json.load(sys.stdin)['object']['sha'])"
             else
               printf '%s\n' "$obj_sha"
