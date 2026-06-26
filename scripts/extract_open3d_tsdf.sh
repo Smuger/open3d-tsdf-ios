@@ -255,7 +255,8 @@ printf '\nNext steps:\n'
 if ! $DRY_RUN; then
     printf '  1. Review verbatim file changes:\n'
     printf '       git diff dependency/manual/open3d-tsdf/\n'
-    printf '  2. Review stubs against upstream headers for new #include dependencies;\n'
+    printf '  2. Review stubs against upstream headers for new methods, operators, or\n'
+    printf '     #include dependencies called by the verbatim .cpp files;\n'
     printf '     upstream headers are at cpp/open3d/ in the Open3D source tree.\n'
     printf '     Stubs that may need updating:\n'
     for stub in "${STUB_HEADERS[@]}"; do

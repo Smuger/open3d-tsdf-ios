@@ -42,6 +42,23 @@ public:
         return !colors_.empty() && colors_.size() == points_.size();
     }
 
+    PointCloud& operator+=(const PointCloud& other) {
+        size_t old_n = points_.size();
+        size_t add_n = other.points_.size();
+        if (add_n == 0) return *this;
+        points_.resize(old_n + add_n);
+        for (size_t i = 0; i < add_n; i++) points_[old_n + i] = other.points_[i];
+        if ((!HasNormals() || old_n == 0) && other.HasNormals()) {
+            normals_.resize(old_n + add_n);
+            for (size_t i = 0; i < add_n; i++) normals_[old_n + i] = other.normals_[i];
+        } else { normals_.clear(); }
+        if ((!HasColors() || old_n == 0) && other.HasColors()) {
+            colors_.resize(old_n + add_n);
+            for (size_t i = 0; i < add_n; i++) colors_[old_n + i] = other.colors_[i];
+        } else { colors_.clear(); }
+        return *this;
+    }
+
     // Factory method used by ScalableTSDFVolume — implemented in PointCloudFactory.cpp
     static std::shared_ptr<PointCloud> CreateFromDepthImage(
             const Image& depth,
