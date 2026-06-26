@@ -127,8 +127,8 @@ jobs:
             "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-macos-universal.tar.gz" \
             -o cmake.tar.gz
           echo "${CMAKE_SHA256}  cmake.tar.gz" | shasum -a 256 --check
-          tar -xf cmake.tar.gz -C /opt
-          echo "/opt/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+          tar -xf cmake.tar.gz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
 
           # ninja — ninja-build official binary
           curl -fsSL \
@@ -139,7 +139,7 @@ jobs:
 
           # conan — commit archive URL is immutable; no mutable tag in the URL
           # commit b57015c99d82424f056e21b3919de596d03dabd8 = v2.29.1
-          pip install --quiet \
+          pip install --quiet --break-system-packages \
             "https://github.com/conan-io/conan/archive/${CONAN_COMMIT}.tar.gz"
           conan profile detect --force
 
@@ -153,7 +153,7 @@ jobs:
       #     --profile:build=default \
       #     --settings os=iOS --settings os.version=16.0 \
       #     --settings arch=armv8 --settings compiler=apple-clang \
-      #     --settings compiler.version=16 --settings compiler.libcxx=libc++ \
+      #     --settings compiler.version=17 --settings compiler.libcxx=libc++ \
       #     --settings build_type=Release
       #   git add conan/locks/ios-arm64.lock && git commit -m "chore: refresh ios-arm64 conan lock"
       - name: Install Eigen (Conan)
@@ -168,7 +168,7 @@ jobs:
             --settings os.version=16.0 \
             --settings arch=armv8 \
             --settings compiler=apple-clang \
-            --settings compiler.version=16 \
+            --settings compiler.version=17 \
             --settings compiler.libcxx=libc++ \
             --settings build_type=Release
 
