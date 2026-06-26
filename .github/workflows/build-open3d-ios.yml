@@ -204,15 +204,17 @@ jobs:
         run: |
           # No Conan toolchain for the simulator — the generated file sets
           # CMAKE_OSX_SYSROOT=iphoneos with FORCE and cannot be overridden.
-          # CMAKE_PREFIX_PATH points at the device Conan output so that
-          # find_package(Eigen3) resolves via the same header-only Eigen3Config.cmake.
+          # With CMAKE_SYSTEM_NAME=iOS, CMake cross-compilation mode restricts
+          # find_package to CMAKE_FIND_ROOT_PATH only, ignoring CMAKE_PREFIX_PATH.
+          # Eigen3_DIR bypasses that entirely by pointing directly at the directory
+          # containing Eigen3Config.cmake from the device Conan install.
           cmake -B build-tsdf-ios-sim -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build-tsdf-ios-device" \
+            -DEigen3_DIR="$GITHUB_WORKSPACE/build-tsdf-ios-device" \
             -S dependency/manual/open3d-tsdf
 
       # ── Build ─────────────────────────────────────────────────────────────────
