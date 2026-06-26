@@ -184,7 +184,7 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="build-tsdf-ios/conan_toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build-tsdf-ios/conan_toolchain.cmake" \
             -S dependency/manual/open3d-tsdf
 
       # ── Build ────────────────────────────────────────────────────────────────
