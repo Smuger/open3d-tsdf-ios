@@ -151,7 +151,7 @@ jobs:
       #   conan lock create --requires="eigen/5.0.1" \
       #     --lockfile-out=conan/locks/ios-arm64.lock \
       #     --profile:build=default \
-      #     --settings os=iOS --settings os.version=16.0 \
+      #     --settings os=iOS --settings os.version=16.0 --settings os.sdk=iphoneos \
       #     --settings arch=armv8 --settings compiler=apple-clang \
       #     --settings compiler.version=17 --settings compiler.libcxx=libc++ \
       #     --settings build_type=Release
@@ -168,6 +168,7 @@ jobs:
             --profile:build=default \
             --settings os=iOS \
             --settings os.version=16.0 \
+            --settings os.sdk=iphoneos \
             --settings arch=armv8 \
             --settings compiler=apple-clang \
             --settings compiler.version=17 \
